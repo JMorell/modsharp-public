@@ -35,6 +35,7 @@ public sealed class PythonPluginLoader : IModSharpModule
     private IGameEventManager _gameEventManager;
     private IServiceProvider _serviceProvider;
     private IEntityManager _entityManager;
+    private bool _hotReload;
 
     public PythonPluginLoader(ISharedSystem sharedSystem,
                               string dllPath,
@@ -45,6 +46,7 @@ public sealed class PythonPluginLoader : IModSharpModule
     {
         _sharedSystem = sharedSystem;
         _sharpPath = sharpPath;
+        _hotReload = hotReload;
     }
 
     public bool Init()
@@ -160,7 +162,7 @@ public sealed class PythonPluginLoader : IModSharpModule
             dynamic instance = cls(_sharedSystem, this);
             _loadedPlugins.Add(instance);
 
-            instance.Load(false);
+            instance.Load(_hotReload);
             RegisterCommands(instance);
         }
         catch (Exception ex)
@@ -177,9 +179,12 @@ public sealed class PythonPluginLoader : IModSharpModule
         foreach (dynamic methodPair in methods)
         {
             dynamic method = methodPair[1];
-            if (PythonEngine.HasAttr(method, "_modsharp_console_command"))
+            // Access underlying function to read attributes
+            dynamic func = method.GetAttr("__func__");
+
+            if (PythonEngine.HasAttr(func, "_modsharp_console_command"))
             {
-                dynamic info = method.GetAttr("_modsharp_console_command");
+                dynamic info = func.GetAttr("_modsharp_console_command");
                 string name = info.name;
                 string desc = info.description;
 
@@ -189,11 +194,6 @@ public sealed class PythonPluginLoader : IModSharpModule
                     {
                         try
                         {
-                            // Resolve IPlayerController if possible
-                            // We use dynamic/object to pass to Python, handling types there or here
-                            // User expects 'player' object with PrintToChat.
-                            // IPlayerController has Print. IGameClient has ConsolePrint.
-
                             object playerObj = client;
                             if (client != null && client.IsValid)
                             {
@@ -204,7 +204,6 @@ public sealed class PythonPluginLoader : IModSharpModule
                                 }
                             }
 
-                            // Call python method: method(player, command)
                             method(playerObj.ToPython(), command.ToPython());
 
                             return ECommandAction.Stopped;
